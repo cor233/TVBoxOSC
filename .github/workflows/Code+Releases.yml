@@ -8,9 +8,7 @@ on:
 jobs:
   sync-code:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      workflows: write
+    permissions: write-all
     steps:
       - name: 检出目标仓库
         uses: actions/checkout@v4

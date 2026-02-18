@@ -14,7 +14,7 @@ jobs:
       - name: 检出目标仓库
         uses: actions/checkout@v4
 
-      - name: 获取并排序源仓库的所有 Releases（使用公共 API，无需认证）
+      - name: 获取并排序源仓库的所有 Releases
         id: get_releases
         run: |
           SOURCE_REPO="j4Uq/TVBoxOSC"

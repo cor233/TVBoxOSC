@@ -1,4 +1,4 @@
-name: 同步Releases
+name: 同步 Releases
 
 on:
   workflow_dispatch:
@@ -9,13 +9,15 @@ jobs:
   sync-releases:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write   # 允许创建 Release 和上传附件
+
     steps:
       - name: 检出目标仓库
         uses: actions/checkout@v4
 
-      - name: 获取并排序源仓库的所有 Releases
-        id: get_releases
+      - name: 获取并排序源仓库的所有 Releases（使用 GITHUB_TOKEN 认证）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           SOURCE_REPO="j4Uq/TVBoxOSC"
           PAGE=1
@@ -23,8 +25,10 @@ jobs:
           RELEASES_JSON=""
           while true; do
             API_URL="https://api.github.com/repos/${SOURCE_REPO}/releases?per_page=${PER_PAGE}&page=${PAGE}"
-            # 关键：未添加 Authorization 头，直接请求公共 API
-            RESPONSE=$(curl -s -H "Accept: application/vnd.github.v3+json" "$API_URL")
+            # 添加认证头，避免公共 API 速率限制
+            RESPONSE=$(curl -s -H "Accept: application/vnd.github.v3+json" \
+              -H "Authorization: token $GH_TOKEN" \
+              "$API_URL")
             if ! echo "$RESPONSE" | jq -e 'type == "array"' > /dev/null; then
               echo "错误：API 响应不是数组，可能已达到速率限制或仓库不可访问。"
               echo "响应内容：$RESPONSE"
@@ -50,15 +54,31 @@ jobs:
             TAG_NAME=$(echo "$release" | jq -r '.tag_name')
             BODY=$(echo "$release" | jq -r '.body // ""')
             echo "正在处理 Release: $TAG_NAME"
-            if gh release view "$TAG_NAME" --repo "$TARGET_REPO" &>/dev/null; then
-              echo "Release $TAG_NAME 已存在，跳过。"
+
+            # 使用 API 检查 Release 是否已存在（更可靠）
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: token $GH_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/$TARGET_REPO/releases/tags/$TAG_NAME")
+            
+            if [ "$HTTP_STATUS" -eq 200 ]; then
+              echo "Release $TAG_NAME 已存在 (HTTP 200)，跳过。"
               continue
+            elif [ "$HTTP_STATUS" -eq 404 ]; then
+              echo "Release $TAG_NAME 不存在，继续创建。"
+            else
+              echo "警告：检查 Release 时返回意外状态码 $HTTP_STATUS，将尝试创建（可能失败）。"
             fi
+
             echo "$BODY" > body.txt
-            gh release create "$TAG_NAME" \
+            if ! gh release create "$TAG_NAME" \
               --repo "$TARGET_REPO" \
               --title "$TAG_NAME" \
-              --notes-file body.txt
+              --notes-file body.txt; then
+              echo "创建 Release $TAG_NAME 失败，请检查错误。"
+              exit 1
+            fi
+
             ASSET_URLS=$(echo "$release" | jq -r '.assets[]?.browser_download_url')
             if [ -n "$ASSET_URLS" ]; then
               mkdir -p "assets_$TAG_NAME"
